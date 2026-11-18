@@ -297,6 +297,45 @@ mod tests {
         assert!(!app.session.doc().unwrap().is_dirty());
     }
 
+    /// Web Save As, Save a Copy and Save as Template go to `download_as` (a hosting page stores
+    /// them as new files, not over the one it opened); Save and exports never do, and without
+    /// `download_as` they all download as Save does.
+    #[test]
+    fn save_as_is_true_only_for_save_as() {
+        type Calls = Rc<RefCell<Vec<(&'static str, String)>>>;
+        let calls = Calls::default();
+        let record = |via: &'static str| {
+            let calls = calls.clone();
+            Box::new(move |name: &str, _: &[u8]| {
+                calls.borrow_mut().push((via, name.to_string()));
+                Ok(())
+            }) as crate::DownloadFn
+        };
+        let services = Services { download: Some(record("download")), download_as: Some(record("download_as")), ..Default::default() };
+        let mut app = VectorcraftApp::new(Session::new(), services);
+        app.run("file.new", json!({"width": 100, "height": 80})).unwrap();
+        app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 30, "height": 20})).unwrap();
+
+        save(&mut app, SaveMode::Save, &json!({"path": "Poster.vectorcraft"}), false).unwrap();
+        save(&mut app, SaveMode::SaveAs, &json!({"path": "Poster 2.vectorcraft"}), false).unwrap();
+        save(&mut app, SaveMode::Copy, &json!({"path": "Poster copy.vectorcraft"}), false).unwrap();
+        app.run("file.exportAs", json!({"path": "Poster.svg"})).unwrap();
+        let vias: Vec<_> = calls.borrow().iter().map(|(via, name)| (*via, name.clone())).collect();
+        assert_eq!(
+            vias,
+            [
+                ("download", "Poster.vectorcraft".to_string()),
+                ("download_as", "Poster 2.vectorcraft".to_string()),
+                ("download_as", "Poster copy.vectorcraft".to_string()),
+                ("download", "Poster.svg".to_string()),
+            ]
+        );
+
+        app.services.download_as = None;
+        save(&mut app, SaveMode::SaveAs, &json!({"path": "Poster 3.vectorcraft"}), false).unwrap();
+        assert_eq!(calls.borrow().last().map(|(via, _)| *via), Some("download"));
+    }
+
     /// A `.ai` file saved from the app names the view's active artboard as its active one, in
     /// the editing copy other apps read.
     #[test]

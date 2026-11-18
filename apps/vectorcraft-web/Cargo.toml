@@ -26,6 +26,8 @@ log = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `wgpu` pulls egui-wgpu's defaults: WebGPU plus the WebGL2 fallback.
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+# The host-page bridge (`?host=parent`): open, save and dirty messages instead of downloads.
+craft-web-host = { git = "https://github.com/storytold/craft-libs", rev = "fd5e2feff6ea25bed371a99cc732b3968d621505", version = "0.1.0" }
 rfd = { workspace = true, features = ["file-handle-inner"] }
 wasm-bindgen = "0.2"
 serde_json = { workspace = true }

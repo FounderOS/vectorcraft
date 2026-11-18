@@ -116,6 +116,10 @@ pub struct Services {
     pub page_inbox: Option<Inbox>,
     /// Web: trigger a browser download instead of writing a path.
     pub download: Option<DownloadFn>,
+    /// Web: Save As…, Save a Copy… and Save as Template… where saving is a download. They hand the
+    /// document over as a new file, so a page hosting the app stores it under a new name instead of
+    /// over the file it opened. `None`: they download as Save does.
+    pub download_as: Option<DownloadFn>,
     /// Web: start an async open (bytes arrive via `picked_inbox`).
     pub open_async: Option<Box<dyn FnMut()>>,
     /// Read the system clipboard's text (desktop). Without it, pasted text only arrives with

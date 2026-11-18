@@ -8,7 +8,7 @@
 //! - no TCP control server (browsers can't listen on sockets);
 //! - File → Open uses the browser file picker; bytes arrive asynchronously through
 //!   `Services::picked_inbox`;
-//! - Save / Export trigger a browser download;
+//! - Save / Export trigger a browser download, or go to the page hosting the app (`host`);
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through the inbox;
 //! - pen and finger input is read from Pointer Events by `pencil` (Apple Pencil pressure and
 //!   hover, palm rejection, fingers navigate once a pen has been seen, the pen's eraser end
@@ -25,6 +25,8 @@ mod api;
 mod demand;
 #[cfg(target_arch = "wasm32")]
 mod fonts;
+#[cfg(target_arch = "wasm32")]
+mod host;
 #[cfg(any(target_arch = "wasm32", test))]
 mod keys;
 #[cfg(any(target_arch = "wasm32", test))]

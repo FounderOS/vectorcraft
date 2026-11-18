@@ -1364,6 +1364,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-web-host"
+version = "0.1.0"
+source = "git+https://github.com/FounderOS/craft-libs?branch=founderos%2Fmain#c3008ca94135723adcdb72951e78477157f9182f"
+dependencies = [
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "craft-window"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=64b181977a0488e4d1e167bc5cc8cfededc2ed4b#64b181977a0488e4d1e167bc5cc8cfededc2ed4b"
@@ -7228,6 +7237,7 @@ name = "vectorcraft-web"
 version = "0.24.1"
 dependencies = [
  "craft-web-api",
+ "craft-web-host",
  "eframe",
  "egui",
  "js-sys",

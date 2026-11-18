@@ -604,6 +604,10 @@ fn write_plan(
         })
     };
     let failed = target.clone().unwrap_or_default();
+    // Save As, Save a Copy and Save as Template make a new file: where saving is a download, they
+    // go to `download_as` when there is one, so a hosting page doesn't store them over the opened
+    // file.
+    let as_new = again.0 != save_command(SaveMode::Save);
     // The status line before the save starts: on the worker, the save sets one line ("<label>…")
     // right after this; written right away, it sets none before `then` runs.
     let (sets, started_line) = (app.ui.status_sets, format!("{label}…"));
@@ -642,7 +646,14 @@ fn write_plan(
         }
         Ok(r)
     };
-    let mut r = background::run(app, enabled, label, Some(uid), work, then)?;
+    let mut r = match app.services.download_as.as_mut().filter(|_| as_new) {
+        // A download never runs in the background: this is what `background::run` does then.
+        Some(download_as) => {
+            let r = work(&mut |p: &str, b: &[u8]| download_as(&fileio::file_name(p), b));
+            then(app, r)?
+        }
+        None => background::run(app, enabled, label, Some(uid), work, then)?,
+    };
     if let Some(path) = target.filter(|_| r.get("path").is_none()) {
         r["path"] = json!(path);
     }
