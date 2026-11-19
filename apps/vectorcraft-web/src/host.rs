@@ -5,8 +5,11 @@
 //!
 //! - `vectorcraft:ready` once the app is running and listening. VectorCraft reads whole files, so
 //!   it says `file: false` and a host sends `bytes`.
-//! - `vectorcraft:open` `{ name, bytes }` goes into the page's open inbox, where
-//!   `window.vectorcraft.openFile` puts its files, and opens as they do.
+//! - `vectorcraft:open` `{ name, bytes }` opens as the host's file: a document gets its name as
+//!   its path, so File › Save (and autosave, `crate::autosave`) writes it back to the host with no
+//!   dialog ([`open_files`]). Anything else File › Open takes (plug-ins, presets, libraries…)
+//!   goes into the page's open inbox, where `window.vectorcraft.openFile` puts its files, and
+//!   opens as they do.
 //! - `vectorcraft:save` `{ name, bytes, saveAs }` for every file the app would download: Save and
 //!   exports with `saveAs: false` (an export under its own extension); Save As…, Save a Copy… and
 //!   Save as Template… with `true`.
@@ -16,7 +19,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use std::sync::PoisonError;
+
 use craft_web_host::web::{FileData, Host, Message};
+use vectorcraft_ui_egui::{VectorcraftApp, io};
 
 use crate::web::Inbox;
 
@@ -73,12 +79,27 @@ impl Bridge {
     }
 }
 
+/// Open the files the host sent (`inbox`, [`connect`]'s). A document opens with the host's name
+/// for it as its path, so a Save writes it back as that file without asking for a name and
+/// format; anything else File › Open takes goes into `page`, the page script's inbox, and opens
+/// as it always did.
+pub fn open_files(app: &mut VectorcraftApp, inbox: &Inbox, page: &Inbox) {
+    let files = std::mem::take(&mut *inbox.lock().unwrap_or_else(PoisonError::into_inner));
+    for (name, bytes) in files {
+        if io::opens_as(&name).is_some() {
+            page.lock().unwrap_or_else(PoisonError::into_inner).push((name, bytes));
+        } else if let Err(e) = io::open_bytes(app, &name, &bytes, Some(name.clone())) {
+            io::report_open_error(app, &name, &e);
+        }
+    }
+}
+
 fn deliver_open(inbox: &Inbox, ctx: Option<&egui::Context>, name: String, data: &FileData) {
     let FileData::Bytes(array) = data else {
         log::warn!("host file {name} came as a File; VectorCraft reads bytes only; not opened");
         return;
     };
-    inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((name, array.to_vec()));
+    inbox.lock().unwrap_or_else(PoisonError::into_inner).push((name, array.to_vec()));
     if let Some(ctx) = ctx {
         ctx.request_repaint();
     }

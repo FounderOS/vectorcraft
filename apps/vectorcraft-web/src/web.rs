@@ -19,7 +19,9 @@ use vectorcraft_ui_egui::print::{PrintJob, PrintService, Printer};
 use vectorcraft_ui_egui::stylus::StylusFeed;
 use vectorcraft_ui_egui::{PickedInbox, Services, VectorcraftApp};
 use wasm_bindgen::JsCast as _;
+use web_time::Instant;
 
+use crate::autosave::Autosave;
 use crate::locks::WebLocks;
 use crate::pencil::SharedPointers;
 
@@ -35,6 +37,9 @@ struct OpenInboxes {
     picked: PickedInbox,
     /// Handed over by the page's script (`window.vectorcraft.openFile`).
     page: Inbox,
+    /// Sent by the hosting page (`crate::host`), opened by the shell as the host's files
+    /// ([`crate::host::open_files`]).
+    host: Inbox,
 }
 
 /// Where the pointer was over the canvas during the last file drag (CSS px from its top-left) and
@@ -96,7 +101,7 @@ pub fn start() {
         crate::fonts::load_startup_fonts().await;
         let inbox = OpenInboxes::default();
         // Connected before the runner starts, so a host still hears `failed` when it can't.
-        let bridge = crate::host::connect(&canvas, &inbox.page);
+        let bridge = crate::host::connect(&canvas, &inbox.host);
         let host = Host {
             runner: eframe::WebRunner::new(),
             inbox,
@@ -178,7 +183,8 @@ async fn run(host: Host, canvas: web_sys::HtmlCanvasElement, moving: Option<Movi
                         VectorcraftApp::new(Session::new(), services).with_control(control_rx)
                     }
                 };
-                Ok(Box::new(WebShell { app: Some(app), host, canvas: page, loss }))
+                let autosave = host.bridge.as_ref().map(|_| Autosave::new(Instant::now()));
+                Ok(Box::new(WebShell { app: Some(app), host, canvas: page, loss, autosave }))
             }),
         )
         .await;
@@ -392,9 +398,32 @@ struct WebShell {
     host: Host,
     canvas: web_sys::HtmlCanvasElement,
     loss: GraphicsLoss,
+    /// Saves to the host once the document rests (`crate::autosave`); only in host mode.
+    autosave: Option<Autosave>,
 }
 
 impl WebShell {
+    /// Host mode: File › Save (to the host, as Ctrl+S does) once the document in front has had
+    /// unsaved changes and no work for [`crate::autosave::IDLE`]. Only when that Save writes the
+    /// document's own file without asking (a document the host opened has its name as its path,
+    /// [`crate::host::open_files`]); autosave never opens the Save As dialog.
+    fn autosave(&mut self, ctx: &egui::Context) {
+        let (Some(autosave), Some(app)) = (&mut self.autosave, &mut self.app) else { return };
+        let now = Instant::now();
+        let front = app.session.active();
+        let dirty = front.is_some_and(vectorcraft_engine::DocState::is_dirty) && saves_in_place(app);
+        let busy = crate::autosave::user_busy(ctx) || front.is_some_and(|d| d.interaction.is_some());
+        let saving = front.is_some_and(|d| app.background.busy_with(d.uid));
+        if autosave.step(front.map(|d| (d.uid, d.revision)), dirty, busy, saving, now)
+            && let Err(e) = app.run("file.save", serde_json::json!({}))
+        {
+            log::warn!("autosave: {e}");
+        }
+        if let Some(wait) = autosave.wake_in(now) {
+            ctx.request_repaint_after(wait);
+        }
+    }
+
     /// The graphics were lost (`why`): keep recovery copies, then start again on a new canvas
     /// with the same app once this frame is over (the runner is busy with it until then).
     fn restart(&mut self, why: &str) {
@@ -422,9 +451,13 @@ impl eframe::App for WebShell {
             self.restart(&why);
         }
         let Some(app) = &mut self.app else { return };
+        if self.host.bridge.is_some() {
+            crate::host::open_files(app, &self.host.inbox.host, &self.host.inbox.page);
+        }
         app.tick(ctx);
         app.finish_ime_logic(ctx);
-        if let Some(bridge) = &self.host.bridge {
+        self.autosave(ctx);
+        if let (Some(bridge), Some(app)) = (&self.host.bridge, &self.app) {
             bridge.dirty(vectorcraft_ui_egui::unsaved::any_dirty(app));
         }
     }
@@ -478,6 +511,9 @@ impl eframe::App for WebShell {
             }
             app.ui(ui);
         }
+        // Again after the UI: an edit made in it starts its idle time now, not at the next pass,
+        // which an idle page may never run.
+        self.autosave(&ctx);
     }
 }
 
@@ -748,4 +784,10 @@ fn print_pdf(pdf: &[u8]) -> Result<(), String> {
     frame.set_src(&url);
     document.body().ok_or("no body")?.append_child(&frame).map_err(js_err)?;
     Ok(())
+}
+
+/// File › Save of the document in front writes its own file now, with no dialog: it has one, in a
+/// format Save writes, and replacing it loses nothing that was read from it (else Save asks first).
+fn saves_in_place(app: &VectorcraftApp) -> bool {
+    fileio::save_plan(&app.session, fileio::SaveMode::Save, &serde_json::json!({})).is_ok_and(|plan| plan.path.is_some())
 }
